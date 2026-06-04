@@ -18,6 +18,10 @@ export interface AnalyticsData {
   losingTrades: number
 }
 
+function toLocalDateKey(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+}
+
 export async function getAnalytics(displayCurrency = "USD"): Promise<AnalyticsData> {
   const session = await getSession()
 
@@ -34,7 +38,6 @@ export async function getAnalytics(displayCurrency = "USD"): Promise<AnalyticsDa
     WHERE user_id = ${session.userId} AND portfolio_id = ${portfolioId} AND status = 'closed'
   ` as Array<{ profit_loss: string; sell_date: string; currency: string }>
 
-  // Get counts
   const counts = await sql`
     SELECT
       COUNT(*) as total_trades,
@@ -48,7 +51,6 @@ export async function getAnalytics(displayCurrency = "USD"): Promise<AnalyticsDa
   const openPositions = Number.parseInt(counts[0].open_positions)
   const closedPositions = Number.parseInt(counts[0].closed_positions)
 
-  // Calculate profit/loss metrics
   let totalProfitLoss = 0
   let weeklyProfitLoss = 0
   let monthlyProfitLoss = 0
@@ -63,8 +65,9 @@ export async function getAnalytics(displayCurrency = "USD"): Promise<AnalyticsDa
 
   for (const trade of closedTrades) {
     const profitLoss = Number.parseFloat(trade.profit_loss)
-    const tradeCurrency = trade.currency || "USD"
+    if (isNaN(profitLoss)) continue
 
+    const tradeCurrency = trade.currency || "USD"
     const convertedProfitLoss = await convertCurrency(profitLoss, tradeCurrency, displayCurrency)
     totalProfitLoss += convertedProfitLoss
 
@@ -75,15 +78,9 @@ export async function getAnalytics(displayCurrency = "USD"): Promise<AnalyticsDa
     }
 
     const sellDate = new Date(trade.sell_date)
-    if (sellDate >= weekAgo) {
-      weeklyProfitLoss += convertedProfitLoss
-    }
-    if (sellDate >= monthAgo) {
-      monthlyProfitLoss += convertedProfitLoss
-    }
-    if (sellDate >= yearAgo) {
-      yearlyProfitLoss += convertedProfitLoss
-    }
+    if (sellDate >= weekAgo) weeklyProfitLoss += convertedProfitLoss
+    if (sellDate >= monthAgo) monthlyProfitLoss += convertedProfitLoss
+    if (sellDate >= yearAgo) yearlyProfitLoss += convertedProfitLoss
   }
 
   const winRate = closedPositions > 0 ? (profitableTrades / closedPositions) * 100 : 0
@@ -102,46 +99,6 @@ export async function getAnalytics(displayCurrency = "USD"): Promise<AnalyticsDa
   }
 }
 
-export async function getMonthlyChartData(displayCurrency = "USD") {
-  const session = await getSession()
-
-  if (!session) {
-    throw new Error("Unauthorized")
-  }
-
-  const sql = getDb()
-  const portfolioId = await getSelectedPortfolioId()
-
-  const trades = await sql`
-    SELECT
-      DATE_TRUNC('month', sell_date) as month,
-      profit_loss,
-      currency
-    FROM trades
-    WHERE user_id = ${session.userId}
-      AND portfolio_id = ${portfolioId}
-      AND status = 'closed'
-      AND sell_date >= NOW() - INTERVAL '12 months'
-    ORDER BY sell_date ASC
-  ` as Array<{ month: string; profit_loss: string; currency: string }>
-
-  const monthlyData = new Map<string, number>()
-
-  for (const trade of trades) {
-    const monthKey = new Date(trade.month).toLocaleDateString("en-US", { month: "short", year: "numeric" })
-    const profitLoss = Number.parseFloat(trade.profit_loss)
-    const tradeCurrency = trade.currency || "USD"
-    const convertedProfitLoss = await convertCurrency(profitLoss, tradeCurrency, displayCurrency)
-
-    monthlyData.set(monthKey, (monthlyData.get(monthKey) || 0) + convertedProfitLoss)
-  }
-
-  return Array.from(monthlyData.entries()).map(([month, profitLoss]) => ({
-    month,
-    profitLoss,
-  }))
-}
-
 export async function getBalanceHistory(
   period: "daily" | "weekly" | "monthly" | "yearly" = "daily",
   displayCurrency = "USD"
@@ -155,7 +112,6 @@ export async function getBalanceHistory(
   const sql = getDb()
   const portfolioId = await getSelectedPortfolioId()
 
-  // Get initial balance
   const balanceResult = await sql`
     SELECT balance, currency
     FROM user_balance
@@ -170,7 +126,7 @@ export async function getBalanceHistory(
   const balanceCurrency = balanceResult[0].currency || "USD"
   const convertedInitialBalance = await convertCurrency(initialBalance, balanceCurrency, displayCurrency)
 
-  // Get all closed trades ordered by sell date
+  // All closed trades ordered by sell date — used to build running balance
   const trades = await sql`
     SELECT sell_date, profit_loss, currency
     FROM trades
@@ -178,135 +134,84 @@ export async function getBalanceHistory(
       AND portfolio_id = ${portfolioId}
       AND status = 'closed'
       AND sell_date IS NOT NULL
+      AND profit_loss IS NOT NULL
     ORDER BY sell_date ASC
   ` as Array<{ sell_date: string; profit_loss: string; currency: string }>
 
-  if (trades.length === 0) {
-    // No trades yet, just return the initial balance
-    return [
-      {
-        date: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" }),
-        balance: convertedInitialBalance,
-      },
-    ]
-  }
-
-  // Calculate balance at each trade point
+  // Build cumulative balance at each trade close
   const balancePoints: Array<{ date: Date; balance: number }> = []
   let runningBalance = convertedInitialBalance
 
   for (const trade of trades) {
     const profitLoss = Number.parseFloat(trade.profit_loss)
+    if (isNaN(profitLoss)) continue
+
     const tradeCurrency = trade.currency || "USD"
     const convertedProfitLoss = await convertCurrency(profitLoss, tradeCurrency, displayCurrency)
-
     runningBalance += convertedProfitLoss
-    balancePoints.push({
-      date: new Date(trade.sell_date),
-      balance: runningBalance,
-    })
+    balancePoints.push({ date: new Date(trade.sell_date), balance: runningBalance })
   }
 
-  // Group by period
+  // For each period bucket, find the last known balance up to that point.
+  // If there are no trades, all buckets show convertedInitialBalance (flat line).
   const now = new Date()
   let groupedData: Array<{ date: string; balance: number }> = []
 
   if (period === "daily") {
-    // Group by day for last 30 days
-    const daysAgo = 30
-    const startDate = new Date(now.getTime() - daysAgo * 24 * 60 * 60 * 1000)
-
-    const dailyMap = new Map<string, number>()
-
-    // Initialize with initial balance
+    // 30 points: 29 days ago → today
     let currentBalance = convertedInitialBalance
-
-    for (let i = 0; i <= daysAgo; i++) {
-      const date = new Date(startDate.getTime() + i * 24 * 60 * 60 * 1000)
-      const dateKey = date.toISOString().split("T")[0]
-
-      // Find trades up to this date
+    for (let i = 0; i < 30; i++) {
+      const date = new Date(now.getTime() - (29 - i) * 24 * 60 * 60 * 1000)
       const tradesUpToDate = balancePoints.filter((bp) => bp.date <= date)
       if (tradesUpToDate.length > 0) {
         currentBalance = tradesUpToDate[tradesUpToDate.length - 1].balance
       }
-
-      dailyMap.set(dateKey, currentBalance)
+      groupedData.push({
+        date: date.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+        balance: Number(currentBalance.toFixed(2)),
+      })
     }
-
-    groupedData = Array.from(dailyMap.entries()).map(([date, balance]) => ({
-      date: new Date(date).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
-      balance: Number(balance.toFixed(2)),
-    }))
   } else if (period === "weekly") {
-    // Group by week for last 12 weeks
-    const weeksAgo = 12
-    const startDate = new Date(now.getTime() - weeksAgo * 7 * 24 * 60 * 60 * 1000)
-
-    const weeklyMap = new Map<string, number>()
+    // 12 points: 11 weeks ago → this week
     let currentBalance = convertedInitialBalance
-
-    for (let i = 0; i <= weeksAgo; i++) {
-      const date = new Date(startDate.getTime() + i * 7 * 24 * 60 * 60 * 1000)
-      const weekKey = `Week ${i + 1}`
-
+    for (let i = 0; i < 12; i++) {
+      const date = new Date(now.getTime() - (11 - i) * 7 * 24 * 60 * 60 * 1000)
       const tradesUpToDate = balancePoints.filter((bp) => bp.date <= date)
       if (tradesUpToDate.length > 0) {
         currentBalance = tradesUpToDate[tradesUpToDate.length - 1].balance
       }
-
-      weeklyMap.set(weekKey, currentBalance)
+      groupedData.push({
+        date: `Week ${i + 1}`,
+        balance: Number(currentBalance.toFixed(2)),
+      })
     }
-
-    groupedData = Array.from(weeklyMap.entries()).map(([date, balance]) => ({
-      date,
-      balance: Number(balance.toFixed(2)),
-    }))
   } else if (period === "monthly") {
-    // Group by month for last 12 months
-    const monthsAgo = 12
-    const monthlyMap = new Map<string, number>()
+    // 12 points: 11 months ago → this month
     let currentBalance = convertedInitialBalance
-
-    for (let i = monthsAgo; i >= 0; i--) {
-      const date = new Date(now.getFullYear(), now.getMonth() - i, 1)
-      const monthKey = date.toLocaleDateString("en-US", { month: "short", year: "numeric" })
-
+    for (let i = 11; i >= 0; i--) {
+      const date = new Date(now.getFullYear(), now.getMonth() - i + 1, 0) // last day of month
+      const monthKey = new Date(now.getFullYear(), now.getMonth() - i, 1).toLocaleDateString("en-US", {
+        month: "short",
+        year: "numeric",
+      })
       const tradesUpToDate = balancePoints.filter((bp) => bp.date <= date)
       if (tradesUpToDate.length > 0) {
         currentBalance = tradesUpToDate[tradesUpToDate.length - 1].balance
       }
-
-      monthlyMap.set(monthKey, currentBalance)
+      groupedData.push({ date: monthKey, balance: Number(currentBalance.toFixed(2)) })
     }
-
-    groupedData = Array.from(monthlyMap.entries()).map(([date, balance]) => ({
-      date,
-      balance: Number(balance.toFixed(2)),
-    }))
   } else if (period === "yearly") {
-    // Group by year for last 5 years
-    const yearsAgo = 5
-    const yearlyMap = new Map<string, number>()
+    // 5 points: 4 years ago → this year
     let currentBalance = convertedInitialBalance
-
-    for (let i = yearsAgo; i >= 0; i--) {
+    for (let i = 4; i >= 0; i--) {
       const year = now.getFullYear() - i
-      const date = new Date(year, 11, 31) // End of year
-      const yearKey = year.toString()
-
+      const date = new Date(year, 11, 31) // end of year
       const tradesUpToDate = balancePoints.filter((bp) => bp.date <= date)
       if (tradesUpToDate.length > 0) {
         currentBalance = tradesUpToDate[tradesUpToDate.length - 1].balance
       }
-
-      yearlyMap.set(yearKey, currentBalance)
+      groupedData.push({ date: year.toString(), balance: Number(currentBalance.toFixed(2)) })
     }
-
-    groupedData = Array.from(yearlyMap.entries()).map(([date, balance]) => ({
-      date,
-      balance: Number(balance.toFixed(2)),
-    }))
   }
 
   return groupedData
@@ -324,12 +229,8 @@ export async function getProfitLossByPeriod(
 
   const sql = getDb()
   const portfolioId = await getSelectedPortfolioId()
-
   const now = new Date()
-  let startDate: Date
-  let groupedData: Array<{ date: string; profitLoss: number }> = []
 
-  // Get closed trades
   const trades = await sql`
     SELECT sell_date, profit_loss, currency
     FROM trades
@@ -337,110 +238,112 @@ export async function getProfitLossByPeriod(
       AND portfolio_id = ${portfolioId}
       AND status = 'closed'
       AND sell_date IS NOT NULL
+      AND profit_loss IS NOT NULL
     ORDER BY sell_date ASC
   ` as Array<{ sell_date: string; profit_loss: string; currency: string }>
 
   if (period === "daily") {
+    // 7 buckets using local dates to avoid midnight UTC edge cases
     const dailyMap = new Map<string, number>()
-    
     for (let i = 6; i >= 0; i--) {
-      const date = new Date(now.getTime() - i * 24 * 60 * 60 * 1000)
-      const dateKey = date.toISOString().split("T")[0]
-      dailyMap.set(dateKey, 0)
+      dailyMap.set(toLocalDateKey(new Date(now.getTime() - i * 24 * 60 * 60 * 1000)), 0)
     }
 
     for (const trade of trades) {
-      const sellDate = new Date(trade.sell_date)
-      const dateKey = sellDate.toISOString().split("T")[0]
-      
-      if (dailyMap.has(dateKey)) {
-        const profitLoss = Number.parseFloat(trade.profit_loss)
-        const tradeCurrency = trade.currency || "USD"
-        const convertedProfitLoss = await convertCurrency(profitLoss, tradeCurrency, displayCurrency)
-        dailyMap.set(dateKey, (dailyMap.get(dateKey) || 0) + convertedProfitLoss)
-      }
+      const profitLoss = Number.parseFloat(trade.profit_loss)
+      if (isNaN(profitLoss)) continue
+
+      const dateKey = toLocalDateKey(new Date(trade.sell_date))
+      if (!dailyMap.has(dateKey)) continue
+
+      const tradeCurrency = trade.currency || "USD"
+      const converted = await convertCurrency(profitLoss, tradeCurrency, displayCurrency)
+      dailyMap.set(dateKey, (dailyMap.get(dateKey) || 0) + converted)
     }
 
-    groupedData = Array.from(dailyMap.entries()).map(([date, profitLoss]) => ({
+    return Array.from(dailyMap.entries()).map(([date, profitLoss]) => ({
       date: new Date(date).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
       profitLoss: Number(profitLoss.toFixed(2)),
     }))
-  } else if (period === "weekly") {
+  }
+
+  if (period === "weekly") {
     const weeklyMap = new Map<string, number>()
-    
     for (let i = 11; i >= 0; i--) {
-      const weekStart = new Date(now.getTime() - i * 7 * 24 * 60 * 60 * 1000)
-      const weekKey = `Week ${12 - i}`
-      weeklyMap.set(weekKey, 0)
+      weeklyMap.set(`Week ${12 - i}`, 0)
     }
 
     for (const trade of trades) {
+      const profitLoss = Number.parseFloat(trade.profit_loss)
+      if (isNaN(profitLoss)) continue
+
       const sellDate = new Date(trade.sell_date)
       const weeksAgo = Math.floor((now.getTime() - sellDate.getTime()) / (7 * 24 * 60 * 60 * 1000))
-      
-      if (weeksAgo >= 0 && weeksAgo < 12) {
-        const weekKey = `Week ${12 - weeksAgo}`
-        const profitLoss = Number.parseFloat(trade.profit_loss)
-        const tradeCurrency = trade.currency || "USD"
-        const convertedProfitLoss = await convertCurrency(profitLoss, tradeCurrency, displayCurrency)
-        weeklyMap.set(weekKey, (weeklyMap.get(weekKey) || 0) + convertedProfitLoss)
-      }
+      if (weeksAgo < 0 || weeksAgo >= 12) continue
+
+      const weekKey = `Week ${12 - weeksAgo}`
+      const tradeCurrency = trade.currency || "USD"
+      const converted = await convertCurrency(profitLoss, tradeCurrency, displayCurrency)
+      weeklyMap.set(weekKey, (weeklyMap.get(weekKey) || 0) + converted)
     }
 
-    groupedData = Array.from(weeklyMap.entries()).map(([date, profitLoss]) => ({
-      date,
-      profitLoss: Number(profitLoss.toFixed(2)),
-    }))
-  } else if (period === "monthly") {
-    const monthlyMap = new Map<string, number>()
-    
-    for (let i = 11; i >= 0; i--) {
-      const date = new Date(now.getFullYear(), now.getMonth() - i, 1)
-      const monthKey = date.toLocaleDateString("en-US", { month: "short", year: "numeric" })
-      monthlyMap.set(monthKey, 0)
-    }
-
-    for (const trade of trades) {
-      const sellDate = new Date(trade.sell_date)
-      const monthKey = sellDate.toLocaleDateString("en-US", { month: "short", year: "numeric" })
-      
-      if (monthlyMap.has(monthKey)) {
-        const profitLoss = Number.parseFloat(trade.profit_loss)
-        const tradeCurrency = trade.currency || "USD"
-        const convertedProfitLoss = await convertCurrency(profitLoss, tradeCurrency, displayCurrency)
-        monthlyMap.set(monthKey, (monthlyMap.get(monthKey) || 0) + convertedProfitLoss)
-      }
-    }
-
-    groupedData = Array.from(monthlyMap.entries()).map(([date, profitLoss]) => ({
-      date,
-      profitLoss: Number(profitLoss.toFixed(2)),
-    }))
-  } else if (period === "yearly") {
-    const yearlyMap = new Map<string, number>()
-    
-    for (let i = 4; i >= 0; i--) {
-      const year = now.getFullYear() - i
-      yearlyMap.set(year.toString(), 0)
-    }
-
-    for (const trade of trades) {
-      const sellDate = new Date(trade.sell_date)
-      const yearKey = sellDate.getFullYear().toString()
-      
-      if (yearlyMap.has(yearKey)) {
-        const profitLoss = Number.parseFloat(trade.profit_loss)
-        const tradeCurrency = trade.currency || "USD"
-        const convertedProfitLoss = await convertCurrency(profitLoss, tradeCurrency, displayCurrency)
-        yearlyMap.set(yearKey, (yearlyMap.get(yearKey) || 0) + convertedProfitLoss)
-      }
-    }
-
-    groupedData = Array.from(yearlyMap.entries()).map(([date, profitLoss]) => ({
+    return Array.from(weeklyMap.entries()).map(([date, profitLoss]) => ({
       date,
       profitLoss: Number(profitLoss.toFixed(2)),
     }))
   }
 
-  return groupedData
+  if (period === "monthly") {
+    const monthlyMap = new Map<string, number>()
+    for (let i = 11; i >= 0; i--) {
+      const key = new Date(now.getFullYear(), now.getMonth() - i, 1).toLocaleDateString("en-US", {
+        month: "short",
+        year: "numeric",
+      })
+      monthlyMap.set(key, 0)
+    }
+
+    for (const trade of trades) {
+      const profitLoss = Number.parseFloat(trade.profit_loss)
+      if (isNaN(profitLoss)) continue
+
+      const monthKey = new Date(trade.sell_date).toLocaleDateString("en-US", {
+        month: "short",
+        year: "numeric",
+      })
+      if (!monthlyMap.has(monthKey)) continue
+
+      const tradeCurrency = trade.currency || "USD"
+      const converted = await convertCurrency(profitLoss, tradeCurrency, displayCurrency)
+      monthlyMap.set(monthKey, (monthlyMap.get(monthKey) || 0) + converted)
+    }
+
+    return Array.from(monthlyMap.entries()).map(([date, profitLoss]) => ({
+      date,
+      profitLoss: Number(profitLoss.toFixed(2)),
+    }))
+  }
+
+  // yearly — 5 points
+  const yearlyMap = new Map<string, number>()
+  for (let i = 4; i >= 0; i--) {
+    yearlyMap.set((now.getFullYear() - i).toString(), 0)
+  }
+
+  for (const trade of trades) {
+    const profitLoss = Number.parseFloat(trade.profit_loss)
+    if (isNaN(profitLoss)) continue
+
+    const yearKey = new Date(trade.sell_date).getFullYear().toString()
+    if (!yearlyMap.has(yearKey)) continue
+
+    const tradeCurrency = trade.currency || "USD"
+    const converted = await convertCurrency(profitLoss, tradeCurrency, displayCurrency)
+    yearlyMap.set(yearKey, (yearlyMap.get(yearKey) || 0) + converted)
+  }
+
+  return Array.from(yearlyMap.entries()).map(([date, profitLoss]) => ({
+    date,
+    profitLoss: Number(profitLoss.toFixed(2)),
+  }))
 }

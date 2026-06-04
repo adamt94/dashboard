@@ -20,7 +20,7 @@ export function PeriodStatsText({ weeklyPnL, monthlyPnL, yearlyPnL, currency }: 
     <div className="grid gap-4 md:grid-cols-3">
       <Card>
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-          <CardTitle className="text-sm font-medium">Weekly P&L</CardTitle>
+          <CardTitle className="text-sm font-medium">7-Day P&L</CardTitle>
           {safeWeeklyPnL >= 0 ? (
             <TrendingUp className="h-4 w-4 text-green-600" />
           ) : (
@@ -38,7 +38,7 @@ export function PeriodStatsText({ weeklyPnL, monthlyPnL, yearlyPnL, currency }: 
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-          <CardTitle className="text-sm font-medium">Monthly P&L</CardTitle>
+          <CardTitle className="text-sm font-medium">30-Day P&L</CardTitle>
           {safeMonthlyPnL >= 0 ? (
             <TrendingUp className="h-4 w-4 text-green-600" />
           ) : (
@@ -56,7 +56,7 @@ export function PeriodStatsText({ weeklyPnL, monthlyPnL, yearlyPnL, currency }: 
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-          <CardTitle className="text-sm font-medium">Yearly P&L</CardTitle>
+          <CardTitle className="text-sm font-medium">365-Day P&L</CardTitle>
           {safeYearlyPnL >= 0 ? (
             <TrendingUp className="h-4 w-4 text-green-600" />
           ) : (

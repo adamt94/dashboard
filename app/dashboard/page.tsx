@@ -5,7 +5,6 @@ import { BalanceCard } from "@/components/balance-card"
 import { AddTradeDialog } from "@/components/add-trade-dialog"
 import { TradesTable } from "@/components/trades-table"
 import { StatsCards } from "@/components/stats-cards"
-import { PeriodStats } from "@/components/period-stats"
 import { BalanceHistoryChart } from "@/components/balance-history-chart"
 import { ProfitLossChart } from "@/components/profit-loss-chart"
 import { getBalance } from "@/app/actions/balance"
@@ -64,11 +63,11 @@ export default async function DashboardPage() {
               />
             </div>
             <div className="lg:col-span-2">
-              <ProfitLossChart initialData={profitLossData} currency={displayCurrency} />
+              <ProfitLossChart key={displayCurrency} initialData={profitLossData} currency={displayCurrency} />
             </div>
           </div>
 
-          <BalanceHistoryChart initialData={balanceHistory} currency={displayCurrency} />
+          <BalanceHistoryChart key={`bal-${displayCurrency}`} initialData={balanceHistory} currency={displayCurrency} />
 
           <Card>
             <CardHeader>
