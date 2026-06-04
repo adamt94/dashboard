@@ -53,7 +53,7 @@ async function fetchExchangeRates(): Promise<ExchangeRates> {
       cachedRates = data.rates
       cacheTimestamp = now
       console.log("[v0] Successfully fetched and cached exchange rates")
-      return cachedRates
+      return cachedRates!
     } else {
       throw new Error("Invalid API response format")
     }

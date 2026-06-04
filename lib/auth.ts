@@ -24,9 +24,9 @@ export async function createUser(email: string, password: string, name: string):
     INSERT INTO users (email, password_hash, name)
     VALUES (${email}, ${passwordHash}, ${name})
     RETURNING id, email, name, created_at
-  `
+  ` as User[]
 
-  return result[0] as User
+  return result[0]
 }
 
 export async function getUserByEmail(email: string) {
@@ -36,7 +36,7 @@ export async function getUserByEmail(email: string) {
     SELECT id, email, password_hash, name, created_at
     FROM users
     WHERE email = ${email}
-  `
+  ` as Array<User & { password_hash: string }>
 
   return result[0]
 }

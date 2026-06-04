@@ -20,7 +20,7 @@ import { type Portfolio, setSelectedPortfolio, createPortfolio, deletePortfolio 
 
 interface PortfolioSelectorProps {
   portfolios: Portfolio[]
-  currentPortfolioId: number
+  currentPortfolioId: number | null
 }
 
 export function PortfolioSelector({ portfolios, currentPortfolioId }: PortfolioSelectorProps) {

@@ -5,14 +5,14 @@ import { TrendingUp, LogOut } from "lucide-react"
 import { CurrencySelector } from "@/components/currency-selector"
 import { PortfolioSelector } from "@/components/portfolio-selector"
 import { getBalance } from "@/app/actions/balance"
-import { getPortfolios, getSelectedPortfolioId } from "@/app/actions/portfolios"
+import { getPortfolios, getSelectedPortfolioId, type Portfolio } from "@/app/actions/portfolios"
 
 export async function DashboardHeader() {
   const session = await getSession()
   const { currency } = await getBalance()
 
-  let portfolios = []
-  let currentPortfolioId = null
+  let portfolios: Portfolio[] = []
+  let currentPortfolioId: number | null = null
   let portfoliosAvailable = false
 
   try {

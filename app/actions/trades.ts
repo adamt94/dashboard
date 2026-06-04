@@ -116,7 +116,7 @@ export async function updateTrade(formData: FormData) {
 
     const trade = await sql`
       SELECT id FROM trades WHERE id = ${tradeId} AND user_id = ${session.userId} AND portfolio_id = ${portfolioId}
-    `
+    ` as Array<{ id: number }>
 
     if (trade.length === 0) {
       return { error: "Trade not found" }
@@ -182,9 +182,9 @@ export async function partialSellTrade(formData: FormData) {
 
     // Get the original trade
     const trades = await sql`
-      SELECT * FROM trades 
+      SELECT * FROM trades
       WHERE id = ${tradeId} AND user_id = ${session.userId} AND portfolio_id = ${portfolioId}
-    `
+    ` as Trade[]
 
     if (trades.length === 0) {
       return { error: "Trade not found" }

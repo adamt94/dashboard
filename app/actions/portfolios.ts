@@ -56,7 +56,7 @@ export async function getSelectedPortfolioId(): Promise<number | null> {
         SELECT id FROM portfolios
         WHERE user_id = ${session.userId} AND is_default = true
         LIMIT 1
-      `
+      ` as Array<{ id: number }>
 
       if (result.length === 0) {
         return null
@@ -85,7 +85,7 @@ export async function setSelectedPortfolio(portfolioId: number) {
   const portfolio = await sql`
     SELECT id FROM portfolios
     WHERE id = ${portfolioId} AND user_id = ${session.userId}
-  `
+  ` as Array<{ id: number }>
 
   if (portfolio.length === 0) {
     return { error: "Portfolio not found" }
@@ -127,7 +127,7 @@ export async function createPortfolio(formData: FormData) {
       INSERT INTO portfolios (user_id, name, description, is_default)
       VALUES (${session.userId}, ${name}, ${description || null}, false)
       RETURNING id
-    `
+    ` as Array<{ id: number }>
     console.log("[v0] Portfolio created with id:", result[0].id)
 
     console.log("[v0] Creating balance entry for portfolio")
@@ -159,7 +159,7 @@ export async function deletePortfolio(portfolioId: number) {
     const portfolio = await sql`
       SELECT is_default FROM portfolios
       WHERE id = ${portfolioId} AND user_id = ${session.userId}
-    `
+    ` as Array<{ is_default: boolean }>
 
     if (portfolio.length === 0) {
       return { error: "Portfolio not found" }

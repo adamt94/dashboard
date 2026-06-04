@@ -24,7 +24,7 @@ export async function getBalance() {
       FROM user_balance
       WHERE user_id = ${session.userId} AND portfolio_id = ${portfolioId}
       LIMIT 1
-    `
+    ` as Array<{ balance: string; currency: string; updated_at: Date }>
 
     const balanceData = result[0] || { balance: 0, currency: "USD", updated_at: new Date() }
     const baseBalance = Number.parseFloat(balanceData.balance)
@@ -33,11 +33,11 @@ export async function getBalance() {
     const trades = await sql`
       SELECT profit_loss, currency
       FROM trades
-      WHERE user_id = ${session.userId} 
+      WHERE user_id = ${session.userId}
         AND portfolio_id = ${portfolioId}
         AND status = 'closed'
         AND profit_loss IS NOT NULL
-    `
+    ` as Array<{ profit_loss: string; currency: string }>
 
     let totalProfitLoss = 0
     for (const trade of trades) {
@@ -122,7 +122,7 @@ export async function updateCurrency(currency: string) {
       SET currency = ${currency}, updated_at = CURRENT_TIMESTAMP
       WHERE user_id = ${session.userId} AND portfolio_id = ${portfolioId}
       RETURNING id
-    `
+    ` as Array<{ id: number }>
 
     // If no balance entry exists for this specific portfolio, try to update by user_id only
     // This handles cases where the unique constraint is still on user_id only

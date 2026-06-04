@@ -32,17 +32,17 @@ export async function getAnalytics(displayCurrency = "USD"): Promise<AnalyticsDa
     SELECT profit_loss, sell_date, currency
     FROM trades
     WHERE user_id = ${session.userId} AND portfolio_id = ${portfolioId} AND status = 'closed'
-  `
+  ` as Array<{ profit_loss: string; sell_date: string; currency: string }>
 
   // Get counts
   const counts = await sql`
-    SELECT 
+    SELECT
       COUNT(*) as total_trades,
       COUNT(CASE WHEN status = 'open' THEN 1 END) as open_positions,
       COUNT(CASE WHEN status = 'closed' THEN 1 END) as closed_positions
     FROM trades
     WHERE user_id = ${session.userId} AND portfolio_id = ${portfolioId}
-  `
+  ` as Array<{ total_trades: string; open_positions: string; closed_positions: string }>
 
   const totalTrades = Number.parseInt(counts[0].total_trades)
   const openPositions = Number.parseInt(counts[0].open_positions)
@@ -113,17 +113,17 @@ export async function getMonthlyChartData(displayCurrency = "USD") {
   const portfolioId = await getSelectedPortfolioId()
 
   const trades = await sql`
-    SELECT 
+    SELECT
       DATE_TRUNC('month', sell_date) as month,
       profit_loss,
       currency
     FROM trades
-    WHERE user_id = ${session.userId} 
+    WHERE user_id = ${session.userId}
       AND portfolio_id = ${portfolioId}
       AND status = 'closed'
       AND sell_date >= NOW() - INTERVAL '12 months'
     ORDER BY sell_date ASC
-  `
+  ` as Array<{ month: string; profit_loss: string; currency: string }>
 
   const monthlyData = new Map<string, number>()
 
@@ -160,7 +160,7 @@ export async function getBalanceHistory(
     SELECT balance, currency
     FROM user_balance
     WHERE user_id = ${session.userId} AND portfolio_id = ${portfolioId}
-  `
+  ` as Array<{ balance: string; currency: string }>
 
   if (balanceResult.length === 0) {
     return []
@@ -174,12 +174,12 @@ export async function getBalanceHistory(
   const trades = await sql`
     SELECT sell_date, profit_loss, currency
     FROM trades
-    WHERE user_id = ${session.userId} 
+    WHERE user_id = ${session.userId}
       AND portfolio_id = ${portfolioId}
       AND status = 'closed'
       AND sell_date IS NOT NULL
     ORDER BY sell_date ASC
-  `
+  ` as Array<{ sell_date: string; profit_loss: string; currency: string }>
 
   if (trades.length === 0) {
     // No trades yet, just return the initial balance
@@ -333,12 +333,12 @@ export async function getProfitLossByPeriod(
   const trades = await sql`
     SELECT sell_date, profit_loss, currency
     FROM trades
-    WHERE user_id = ${session.userId} 
+    WHERE user_id = ${session.userId}
       AND portfolio_id = ${portfolioId}
       AND status = 'closed'
       AND sell_date IS NOT NULL
     ORDER BY sell_date ASC
-  `
+  ` as Array<{ sell_date: string; profit_loss: string; currency: string }>
 
   if (period === "daily") {
     const dailyMap = new Map<string, number>()

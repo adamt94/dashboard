@@ -1,4 +1,4 @@
-import { SignJWT, jwtVerify } from "jose"
+import { SignJWT, jwtVerify, type JWTPayload } from "jose"
 import { cookies } from "next/headers"
 
 const secret = new TextEncoder().encode(process.env.JWT_SECRET || "your-secret-key-change-in-production")
@@ -9,7 +9,7 @@ export interface SessionData {
 }
 
 export async function createSession(data: SessionData) {
-  const token = await new SignJWT(data).setProtectedHeader({ alg: "HS256" }).setExpirationTime("7d").sign(secret)
+  const token = await new SignJWT(data as unknown as JWTPayload).setProtectedHeader({ alg: "HS256" }).setExpirationTime("7d").sign(secret)
 
   const cookieStore = await cookies()
   cookieStore.set("session", token, {
@@ -31,7 +31,7 @@ export async function getSession(): Promise<SessionData | null> {
 
   try {
     const { payload } = await jwtVerify(token.value, secret)
-    return payload as SessionData
+    return payload as unknown as SessionData
   } catch {
     return null
   }

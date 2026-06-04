@@ -41,7 +41,7 @@ export default async function DashboardPage() {
               <h2 className="text-3xl font-bold tracking-tight">Dashboard</h2>
               <p className="text-muted-foreground">Welcome back, {session.email}</p>
             </div>
-            <AddTradeDialog />
+            <AddTradeDialog defaultCurrency={displayCurrency} />
           </div>
 
           <StatsCards analytics={analytics} currency={displayCurrency} />
@@ -56,9 +56,9 @@ export default async function DashboardPage() {
           <div className="grid gap-4 lg:grid-cols-3">
             <div className="lg:col-span-1">
               <BalanceCard
-                balance={Number.parseFloat(balanceData.balance)}
-                baseBalance={balanceData.baseBalance ? Number.parseFloat(balanceData.baseBalance) : undefined}
-                tradeProfitLoss={balanceData.tradeProfitLoss ? Number.parseFloat(balanceData.tradeProfitLoss) : undefined}
+                balance={balanceData.balance}
+                baseBalance={balanceData.baseBalance}
+                tradeProfitLoss={balanceData.tradeProfitLoss}
                 updatedAt={balanceData.updated_at}
                 currency={displayCurrency}
               />
